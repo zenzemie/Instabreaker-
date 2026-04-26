@@ -8,8 +8,8 @@ class Display:
 
     def banner(self):
         self.console.print(Panel.fit(
-            "[bold cyan]InstaBreaker 2026[/bold cyan]\n[italic]Modern Instagram Tool[/italic]",
-            border_style="blue"
+            "[bold magenta]InstaBreaker 2026 Ultra Edition[/bold magenta]\n[italic blue]AI-Driven Intelligence • Advanced Stealth • Multi-threaded[/italic blue]",
+            border_style="magenta"
         ))
 
     def log(self, message: str):
