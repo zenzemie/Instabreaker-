@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 from typing import Dict, Any
-import httpx
 from ..utils.config import settings
 
 class SessionManager:
@@ -9,10 +8,10 @@ class SessionManager:
         self.username = username
         self.session_file = settings.sessions_dir / f"{username}.json"
 
-    def save_session(self, cookies: httpx.Cookies):
+    def save_session(self, cookies: Any):
         session_data = {
             "username": self.username,
-            "cookies": cookies.get_dict()
+            "cookies": dict(cookies)
         }
         with open(self.session_file, "w") as f:
             json.dump(session_data, f, indent=4)
