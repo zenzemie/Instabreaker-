@@ -34,3 +34,24 @@ class SessionManager:
     def delete_session(self):
         if self.session_file.exists():
             self.session_file.unlink()
+
+    def save_checkpoint(self, target: str, last_index: int):
+        checkpoint_file = settings.checkpoints_dir / f"{target}.json"
+        with open(checkpoint_file, "w") as f:
+            json.dump({"last_index": last_index}, f)
+
+    def load_checkpoint(self, target: str) -> int:
+        checkpoint_file = settings.checkpoints_dir / f"{target}.json"
+        if checkpoint_file.exists():
+            try:
+                with open(checkpoint_file, "r") as f:
+                    data = json.load(f)
+                    return data.get("last_index", 0)
+            except Exception:
+                return 0
+        return 0
+
+    def clear_checkpoint(self, target: str):
+        checkpoint_file = settings.checkpoints_dir / f"{target}.json"
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()

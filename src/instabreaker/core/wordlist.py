@@ -1,12 +1,12 @@
 import itertools
 from typing import List, Optional
-from openai import OpenAI
+from openai import AsyncOpenAI
 from ..utils.config import settings
 
 class WordlistGenerator:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.openai_api_key
-        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
 
     def generate_from_template(self, name: str, birth_year: Optional[str] = None, keywords: List[str] = None) -> List[str]:
         """Generate common password patterns without AI."""
@@ -43,7 +43,7 @@ class WordlistGenerator:
         {profile_info}
         """
         
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
